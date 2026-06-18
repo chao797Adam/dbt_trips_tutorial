@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: trips_source
+    database: pysparkdbt
+    schema: source
+    tables:
+      - name: customers
+        description: "Raw customer records loaded via PySpark streaming"
+      - name: drivers
+        description: "Raw driver records loaded via PySpark streaming"
+      - name: locations
+        description: "Raw pickup/dropoff location records loaded via PySpark streaming"
+      - name: payments
+        description: "Raw payment records loaded via PySpark streaming"
+      - name: trips
+        description: "Raw trip records loaded via PySpark streaming"
+      - name: vehicles
+        description: "Raw vehicle records loaded via PySpark streaming"
