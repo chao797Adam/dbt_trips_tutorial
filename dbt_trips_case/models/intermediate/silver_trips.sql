@@ -1,7 +1,8 @@
 {{
     config(
         materialized='incremental',
-        incremental_strategy='append'
+        unique_key='trip_id',
+        incremental_strategy='merge'
     )
 }}
 
