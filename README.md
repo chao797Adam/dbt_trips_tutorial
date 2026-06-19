@@ -69,7 +69,7 @@ dbt_trips_case/
 │   │   │   ├── silver_payments.sql
 │   │   │   ├── silver_trips.sql
 │   │   │   └── silver_vehicles.sql
-│   │   └── mart/                  # Gold layer (in progress)
+│   │   └── mart/                  # Gold layer 
 │   │       ├── gold_trips_summary.sql
 │   │       ├── gold_customer_segments.sql
 │   │       └── gold_daily_driver_performance.sql
