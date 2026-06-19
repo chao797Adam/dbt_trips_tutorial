@@ -11,5 +11,5 @@
 
     select *
     from {{ ref('stg_trips') }}
-
+# whether use stg_trips or silver_trips 
 {% endsnapshot %}
