@@ -218,7 +218,14 @@ The reference tutorial used `strategy='timestamp'`. However, this project uses `
 
 The reference tutorial materializes silver models as `incremental` (full rebuild on every run). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
 
-### 5. Snapshots placed in the gold layer
+### 5. Snapshots placed in the gold layer, defined via YAML instead of SQL
+
+The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml` file (dbt's newer YAML-based snapshot syntax), with each snapshot's `relation` pointing at a **gold-schema** source (e.g. `source('source_silver', 'payments')` materialized into `schema: gold`), and using `strategy: timestamp` with `updated_at: last_updated_timestamp`.
+
+This project instead defines snapshots using the traditional `{% snapshot %}` SQL block syntax, sourced from **staging** (`stg_*`) models rather than gold-layer tables. Two separate deviations are bundled here:
+
+- **Format**: SQL-block snapshots (this project) vs. YAML-based snapshots (reference). Both are valid, supported dbt syntaxes — this is a stylistic choice, not a correctness issue. YAML snapshots are dbt's more recent recommended format and reduce boilerplate when many snapshots share the same shape, but the SQL-block format makes the underlying `select` statement and any inline transformation more explicit and easier to read for a small number of snapshots.
+- **Source layer**: gold (reference) vs. staging (this project). See rationale below — sourcing from staging keeps each snapshot's history isolated to a single entity, rather than capturing changes introduced by downstream joins in the gold layer.
 
 The reference tutorial appears to build snapshots on top of gold-layer (joined/aggregated) tables. This project places snapshots independently in `snapshots/`, sourced from staging (`stg_*`) models — closer to the original data — so that each snapshot tracks changes to a single entity cleanly, without conflating changes introduced by downstream joins.
 
