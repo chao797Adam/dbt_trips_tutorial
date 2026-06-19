@@ -218,16 +218,14 @@ The reference tutorial used `strategy='timestamp'`. However, this project uses `
 
 The reference tutorial materializes silver models as `incremental` (full rebuild on every run). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
 
-### 5. Snapshots placed in the gold layer, defined via YAML instead of SQL
+### 5. Snapshots materialized into the gold schema, defined via YAML instead of SQL
 
-The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml` file (dbt's newer YAML-based snapshot syntax), with each snapshot's `relation` pointing at a **gold-schema** source (e.g. `source('source_silver', 'payments')` materialized into `schema: gold`), and using `strategy: timestamp` with `updated_at: last_updated_timestamp`.
+The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml` file (dbt's newer YAML-based snapshot syntax). Each snapshot's `relation` reads from a **silver-schema** source (e.g. `source('source_silver', 'payments')`), but the resulting snapshot table is materialized into the **gold** schema (`config: schema: gold`), using `strategy: timestamp` with `updated_at: last_updated_timestamp`.
 
-This project instead defines snapshots using the traditional `{% snapshot %}` SQL block syntax, sourced from **staging** (`stg_*`) models rather than gold-layer tables. Two separate deviations are bundled here:
+This project instead defines snapshots using the traditional `{% snapshot %}` SQL block syntax, both reading from and materializing alongside staging-level data, with the snapshot output kept in its own dedicated `snapshots` schema rather than `gold`. Two separate deviations are bundled here:
 
 - **Format**: SQL-block snapshots (this project) vs. YAML-based snapshots (reference). Both are valid, supported dbt syntaxes — this is a stylistic choice, not a correctness issue. YAML snapshots are dbt's more recent recommended format and reduce boilerplate when many snapshots share the same shape, but the SQL-block format makes the underlying `select` statement and any inline transformation more explicit and easier to read for a small number of snapshots.
-- **Source layer**: gold (reference) vs. staging (this project). See rationale below — sourcing from staging keeps each snapshot's history isolated to a single entity, rather than capturing changes introduced by downstream joins in the gold layer.
-
-The reference tutorial appears to build snapshots on top of gold-layer (joined/aggregated) tables. This project places snapshots independently in `snapshots/`, sourced from staging (`stg_*`) models — closer to the original data — so that each snapshot tracks changes to a single entity cleanly, without conflating changes introduced by downstream joins.
+- **Output location**: gold schema (reference) vs. a dedicated `snapshots` schema (this project). Materializing SCD2 history directly into the gold layer blurs the boundary between "current-state analytics tables" and "historical change-tracking tables" — a BI tool browsing the gold schema would see snapshot tables mixed in with regular fact/dimension tables. This project keeps snapshots in their own schema, sourced from staging (`stg_*`) models, so that gold remains a clean, current-state-only analytics layer, and snapshot history is clearly demarcated as a separate concern.
 
 ### 6. Stylistic: Jinja used for field-list generation
 
