@@ -165,7 +165,23 @@ from transformed
 
 ### Mart (Gold)
 
-In progress — will include a fact/dimension analytics layer joining `trips`, `payments`, and the four dimension tables.
+The Gold layer provides analytics-ready tables for business consumption. Currently, it includes:
+
+| Model | Description |
+| :--- | :--- |
+| `gold_trips_summary` | A comprehensive fact-wide table capturing trip details, joined with customer, driver, and vehicle dimensions. |
+| `gold_customer_segments` | An analytical model segmenting customers into `Frequent`, `Regular`, and `Casual` tiers based on their lifetime trip frequency and spend. |
+| `gold_daily_driver_performance` | Aggregated performance metrics for drivers, calculated on a daily basis (in progress). |
+
+### ⚠️ Known Issues
+
+#### Location Data Granularity Mismatch
+* **Defect**: The `locations` dimension table cannot be joined with the `trips` fact table.
+* **Root Cause**: A granularity mismatch exists between the datasets:
+    * `trips` contains fine-grained, address-level location names (e.g., "North Robert").
+    * `locations` contains only high-level administrative city names (e.g., "Lake Davidport").
+* **Impact**: Direct joins on `city` names result in total data loss (all-NULL values) for geographic attributes in the `gold_trips_summary` model.
+* **Required Resolution**: Implementation of an intermediate Mapping/Bridge table to translate fine-grained locations to administrative city IDs.
 
 ---
 
