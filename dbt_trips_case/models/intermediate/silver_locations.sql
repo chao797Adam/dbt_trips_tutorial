@@ -14,8 +14,10 @@ with
         -- Only process new or updated records during incremental runs
         {% if is_incremental() %}
             where
-                last_updated_timestamp
-                > (select max(last_updated_timestamp) from {{ this }})
+                last_updated_timestamp > (
+                    select coalesce(max(last_updated_timestamp), '1900-01-01')
+                    from {{ this }}
+                )
         {% endif %}
     ),
 
