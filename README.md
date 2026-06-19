@@ -210,24 +210,39 @@ The PySpark `upsert()` method (using `DeltaTable.merge().whenMatchedUpdateAll().
 
 The reference tutorial's streaming write places `checkpointLocation` under the `bronze` Volume path, despite checkpoints being purely a property of the streaming *read* from `source`, not the *bronze* output layer. In this project, checkpoints live under `/Volumes/pysparkdbt/source/checkpoint/{entity}`, alongside the raw source files they correspond to, keeping the layer boundary (source vs. bronze) unambiguous.
 
-### 3. Snapshots strategy
+### 3. Missing `incremental_strategy='merge'` in the silver layer — drawback
 
-The reference tutorial used `strategy='timestamp'`. However, this project uses `strategy='check'` for all snapshots instead of relying on a timestamp-based strategy, since it directly compares column values rather than trusting a potentially stale timestamp field.
+The reference tutorial's silver-layer config specifies `materialized: incremental` without an explicit `incremental_strategy`. On Databricks, dbt's default incremental strategy is `append` — meaning every incremental run **adds new rows on top of existing ones**, rather than overwriting rows that already exist for a given `unique_key`.
 
-### 4. `materialized='incremental'` for the silver layer
+This has a concrete drawback: if a row that was already loaded gets updated at the source (e.g. a customer's `last_updated_timestamp` changes because their phone number was corrected), the next incremental run **appends a second row for the same `customer_id`** rather than overwriting the first. Without an additional deduplication step downstream, the silver table accumulates multiple rows per entity over time — defeating the purpose of an "incremental" load that's supposed to reflect current state.
 
-The reference tutorial materializes silver models as `incremental` (full rebuild on every run). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
+This project explicitly sets `incremental_strategy='merge'` with a matching `unique_key` on every silver model, so that updates to an existing row correctly overwrite the prior version instead of accumulating duplicates. A `row_number()` deduplication step is also included as a defensive measure, since Delta Lake's `MERGE INTO` requires the incoming batch to contain no duplicate `unique_key` values.
 
-### 5. Snapshots materialized into the gold schema, defined via YAML instead of SQL
+### 4. `materialized='table'` for the silver layer
 
-The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml` file (dbt's newer YAML-based snapshot syntax). Each snapshot's `relation` reads from a **silver-schema** source (e.g. `source('source_silver', 'payments')`), but the resulting snapshot table is materialized into the **gold** schema (`config: schema: gold`), using `strategy: timestamp` with `updated_at: last_updated_timestamp`.
+The reference tutorial materializes silver models as `table` (full rebuild on every run, recomputing all historical rows regardless of whether they changed). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
 
-This project instead defines snapshots using the traditional `{% snapshot %}` SQL block syntax, both reading from and materializing alongside staging-level data, with the snapshot output kept in its own dedicated `snapshots` schema rather than `gold`. Two separate deviations are bundled here:
+### 5. Snapshot strategy: `check` vs. `timestamp`
+
+The reference tutorial uses `strategy: timestamp` with `updated_at: last_updated_timestamp`. This project uses `strategy: check` instead — but it's worth being precise about why, since `last_updated_timestamp` (this project's only update-tracking field; there is no separate `updated_at` column) is a genuinely reliable, source-maintained field, not a write-once field like `created_at` (an issue identified separately in the companion Airbnb project).
+
+Given a trustworthy `last_updated_timestamp`, `strategy: timestamp` is technically valid here — it is not "wrong" the way relying on `created_at` would be. The tradeoff is:
+
+- **`strategy: timestamp`** (reference): cheaper to evaluate (compares a single timestamp), but implicitly assumes the source system *always* correctly updates `last_updated_timestamp` whenever a tracked field changes. If any code path in the source system updates a row's data without bumping this timestamp, the snapshot would silently miss that change.
+- **`strategy: check`** (this project): compares the actual values of `check_cols` directly, with no dependency on any timestamp field being reliably maintained. This is more defensive — a change is only missed if the value genuinely didn't change — at the cost of comparing more columns per run.
+
+This project favors `check` as the more conservative choice given an unverified assumption about upstream timestamp reliability, not because `timestamp` is inherently broken.
+
+### 6. Snapshots materialized into the gold schema, defined via YAML instead of SQL
+
+The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml` file (dbt's newer YAML-based snapshot syntax). Each snapshot's `relation` reads from a **silver-schema** source (e.g. `source('source_silver', 'payments')`), but the resulting snapshot table is materialized into the **gold** schema (`config: schema: gold`).
+
+This project instead defines snapshots using the traditional `{% snapshot %}` SQL block syntax, sourced from staging (`stg_*`) models, with the snapshot output kept in its own dedicated `snapshots` schema rather than `gold`. Two separate deviations are bundled here:
 
 - **Format**: SQL-block snapshots (this project) vs. YAML-based snapshots (reference). Both are valid, supported dbt syntaxes — this is a stylistic choice, not a correctness issue. YAML snapshots are dbt's more recent recommended format and reduce boilerplate when many snapshots share the same shape, but the SQL-block format makes the underlying `select` statement and any inline transformation more explicit and easier to read for a small number of snapshots.
 - **Output location**: gold schema (reference) vs. a dedicated `snapshots` schema (this project). Materializing SCD2 history directly into the gold layer blurs the boundary between "current-state analytics tables" and "historical change-tracking tables" — a BI tool browsing the gold schema would see snapshot tables mixed in with regular fact/dimension tables. This project keeps snapshots in their own schema, sourced from staging (`stg_*`) models, so that gold remains a clean, current-state-only analytics layer, and snapshot history is clearly demarcated as a separate concern.
 
-### 6. Stylistic: Jinja used for field-list generation
+### 7. Stylistic: Jinja used for field-list generation
 
 The reference tutorial uses a Jinja `{% for col in cols %}` loop to generate a `select` field list. While syntactically valid, this adds a layer of indirection without reducing actual maintenance burden for a single, non-reused field list — readers must mentally "execute" the loop to know which columns are selected. This project favors explicit `select` statements for single-use field lists, reserving macros/loops for logic that is genuinely reused across multiple models.
 
