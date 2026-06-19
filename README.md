@@ -218,11 +218,7 @@ This has a concrete drawback: if a row that was already loaded gets updated at t
 
 This project explicitly sets `incremental_strategy='merge'` with a matching `unique_key` on every silver model, so that updates to an existing row correctly overwrite the prior version instead of accumulating duplicates. A `row_number()` deduplication step is also included as a defensive measure, since Delta Lake's `MERGE INTO` requires the incoming batch to contain no duplicate `unique_key` values.
 
-### 4. `materialized='table'` for the silver layer
-
-The reference tutorial materializes silver models as `table` (full rebuild on every run, recomputing all historical rows regardless of whether they changed). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
-
-### 5. Snapshot strategy: `check` vs. `timestamp`
+### 4. Snapshot strategy: `check` vs. `timestamp`
 
 The reference tutorial uses `strategy: timestamp` with `updated_at: last_updated_timestamp`. This project uses `strategy: check` instead — but it's worth being precise about why, since `last_updated_timestamp` (this project's only update-tracking field; there is no separate `updated_at` column) is a genuinely reliable, source-maintained field, not a write-once field like `created_at` (an issue identified separately in the companion Airbnb project).
 
@@ -233,7 +229,7 @@ Given a trustworthy `last_updated_timestamp`, `strategy: timestamp` is technical
 
 This project favors `check` as the more conservative choice given an unverified assumption about upstream timestamp reliability, not because `timestamp` is inherently broken.
 
-### 6. Snapshots materialized into the gold schema, defined via YAML instead of SQL
+### 5. Snapshots materialized into the gold schema, defined via YAML instead of SQL
 
 The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml` file (dbt's newer YAML-based snapshot syntax). Each snapshot's `relation` reads from a **silver-schema** source (e.g. `source('source_silver', 'payments')`), but the resulting snapshot table is materialized into the **gold** schema (`config: schema: gold`).
 
@@ -242,7 +238,7 @@ This project instead defines snapshots using the traditional `{% snapshot %}` SQ
 - **Format**: SQL-block snapshots (this project) vs. YAML-based snapshots (reference). Both are valid, supported dbt syntaxes — this is a stylistic choice, not a correctness issue. YAML snapshots are dbt's more recent recommended format and reduce boilerplate when many snapshots share the same shape, but the SQL-block format makes the underlying `select` statement and any inline transformation more explicit and easier to read for a small number of snapshots.
 - **Output location**: gold schema (reference) vs. a dedicated `snapshots` schema (this project). Materializing SCD2 history directly into the gold layer blurs the boundary between "current-state analytics tables" and "historical change-tracking tables" — a BI tool browsing the gold schema would see snapshot tables mixed in with regular fact/dimension tables. This project keeps snapshots in their own schema, sourced from staging (`stg_*`) models, so that gold remains a clean, current-state-only analytics layer, and snapshot history is clearly demarcated as a separate concern.
 
-### 7. Stylistic: Jinja used for field-list generation
+### 6. Stylistic: Jinja used for field-list generation
 
 The reference tutorial uses a Jinja `{% for col in cols %}` loop to generate a `select` field list. While syntactically valid, this adds a layer of indirection without reducing actual maintenance burden for a single, non-reused field list — readers must mentally "execute" the loop to know which columns are selected. This project favors explicit `select` statements for single-use field lists, reserving macros/loops for logic that is genuinely reused across multiple models.
 
