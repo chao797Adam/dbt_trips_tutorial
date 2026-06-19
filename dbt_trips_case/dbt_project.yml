@@ -43,3 +43,7 @@ models:
     mart:
       +schema: gold
       +materialized: table
+snapshots:
+  dbt_trips_case:
+    +target_schema: snapshots
+    +strategy: check      
