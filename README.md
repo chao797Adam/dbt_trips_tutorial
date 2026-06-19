@@ -70,6 +70,9 @@ dbt_trips_case/
 │   │   │   ├── silver_trips.sql
 │   │   │   └── silver_vehicles.sql
 │   │   └── mart/                  # Gold layer (in progress)
+│   │       ├── gold_trips_summary.sql
+│   │       ├── gold_customer_segments.sql
+│   │       └── gold_daily_driver_performance.sql
 │   ├── snapshots/                  # SCD2 historical tracking
 │   │   ├── trips_snapshot.sql           # fact — no dim_ prefix
 │   │   ├── payments_snapshot.sql        # fact — no dim_ prefix
