@@ -10,8 +10,6 @@ with
     base_trips as (
         select *
         from {{ ref('stg_trips') }}
-
-        -- Only load new trips after the last recorded event
         {% if is_incremental() %}
             where
                 last_updated_timestamp > (
@@ -21,28 +19,38 @@ with
         {% endif %}
     ),
 
+    deduplicated as (
+        select *
+        from
+            (
+                select
+                    *,
+                    row_number() over (
+                        partition by trip_id order by last_updated_timestamp desc
+                    ) as rn
+                from base_trips
+            )
+        where rn = 1
+    ),
+
     transformed as (
         select
             trip_id,
             driver_id,
             customer_id,
             vehicle_id,
-            -- Standardize location IDs (ensure no leading/trailing whitespace)
             trim(start_location) as start_location_id,
             trim(end_location) as end_location_id,
-            -- Ensure numeric values are properly cast
             cast(distance_km as double) as distance_km,
             cast(fare_amount as double) as fare_amount,
-            -- Keep timestamps
             trip_start_time,
             trip_end_time,
             trim(payment_method) as payment_method,
             trim(trip_status) as trip_status,
             last_updated_timestamp,
             ingested_at
-        from base_trips
+        from deduplicated
     )
 
--- Append new rows to the fact table
 select *
 from transformed
