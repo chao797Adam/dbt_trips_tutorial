@@ -178,8 +178,8 @@ Snapshots are kept **independent of the bronze/silver/gold layers** and read fro
 | `trips_snapshot` | `stg_trips` | `trip_status`, `trip_end_time`, `distance_km`, `fare_amount`, `payment_method` — fields that get filled in / updated as a trip progresses from `ongoing` to `completed` |
 | `payments_snapshot` | `stg_payments` | `payment_status`, `payment_method`, `amount` |
 | `dim_customers_snapshot` | `stg_customers` | `city`, `phone_number` |
-| `dim_drivers_snapshot` | `stg_drivers` | `license_number`, `phone_number` |
-| `dim_vehicles_snapshot` | `stg_vehicles` | vehicle status / attributes |
+| `dim_drivers_snapshot` | `stg_drivers` | `first_name`,`last_name`, `phone_number` |
+| `dim_vehicles_snapshot` | `stg_vehicles` | `vehicle_type`, `year`, `model`, `make` / attributes |
 | `dim_locations_snapshot` | `stg_locations` | `city`, `state`, `country` (rarely changes, but tracked defensively in case of data corrections) |
 
 Naming convention: dimension-type entities are prefixed `dim_`; fact-type entities (`trips`, `payments`) are not, consistent with standard Kimball-style naming.
