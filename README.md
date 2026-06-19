@@ -210,24 +210,19 @@ The PySpark `upsert()` method (using `DeltaTable.merge().whenMatchedUpdateAll().
 
 The reference tutorial's streaming write places `checkpointLocation` under the `bronze` Volume path, despite checkpoints being purely a property of the streaming *read* from `source`, not the *bronze* output layer. In this project, checkpoints live under `/Volumes/pysparkdbt/source/checkpoint/{entity}`, alongside the raw source files they correspond to, keeping the layer boundary (source vs. bronze) unambiguous.
 
-### 3. `created_at` used as snapshot timestamp — not production-grade
+### 3. Snapshots strategy
 
-(Carried over from the Airbnb project's findings, applied here as well.) `created_at` is a write-once field and cannot detect updates. This project uses `strategy='check'` for all snapshots instead of relying on a timestamp-based strategy, since it directly compares column values rather than trusting a potentially stale timestamp field.
+The reference tutorial used `strategy='timestamp'`. However, this project uses `strategy='check'` for all snapshots instead of relying on a timestamp-based strategy, since it directly compares column values rather than trusting a potentially stale timestamp field.
 
+### 4. `materialized='incremental'` for the silver layer
 
-### 4. `trips` modeled as `append`-only — re-evaluated as `merge`
+The reference tutorial materializes silver models as `incremental` (full rebuild on every run). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
 
-The reference tutorial's `silver_trips` (or equivalent) model uses `incremental_strategy='append'`. Because `trip_status` (and several other fields, such as `trip_end_time`, `distance_km`, `fare_amount`) get updated in place as a trip progresses (`ongoing` → `completed`), `append` would create duplicate rows per `trip_id` rather than reflecting current state. This project uses `incremental_strategy='merge'` with `unique_key='trip_id'` instead — consistent with how the upstream `source` table itself behaves (rows are updated in place, not appended as new events). A true `append`-only / event-sourcing pattern would only be appropriate if the source itself emitted immutable, independent events (e.g., a Kafka-style event stream), which is not the case here.
-
-### 5. `materialized='table'` for the silver layer
-
-The reference tutorial materializes silver models as `table` (full rebuild on every run). This project uses `incremental` + `merge` for silver models instead, which only reprocesses new/changed rows — a meaningfully different performance profile at scale, even though the difference is not observable at this project's small data volume (~1,000 rows per entity).
-
-### 6. Snapshots placed in the gold layer
+### 5. Snapshots placed in the gold layer
 
 The reference tutorial appears to build snapshots on top of gold-layer (joined/aggregated) tables. This project places snapshots independently in `snapshots/`, sourced from staging (`stg_*`) models — closer to the original data — so that each snapshot tracks changes to a single entity cleanly, without conflating changes introduced by downstream joins.
 
-### 7. Stylistic: Jinja used for field-list generation
+### 6. Stylistic: Jinja used for field-list generation
 
 The reference tutorial uses a Jinja `{% for col in cols %}` loop to generate a `select` field list. While syntactically valid, this adds a layer of indirection without reducing actual maintenance burden for a single, non-reused field list — readers must mentally "execute" the loop to know which columns are selected. This project favors explicit `select` statements for single-use field lists, reserving macros/loops for logic that is genuinely reused across multiple models.
 
