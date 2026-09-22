@@ -277,6 +277,9 @@ The PySpark `upsert()` method (using `DeltaTable.merge().whenMatchedUpdateAll().
 The reference tutorial's streaming write places `checkpointLocation` under the `bronze` Volume path, despite checkpoints being purely a property of the streaming *read* from `source`, not the *bronze* output layer. In this project, checkpoints live under `/Volumes/pysparkdbt/source/checkpoint/{entity}`, alongside the raw source files they correspond to, keeping the layer boundary (source vs. bronze) unambiguous.
 
 ```python
+
+entities = ['customers', 'payments', 'locations', 'trips', 'vehicles', 'drivers']
+
 for entity in entities:
     # CSV streaming sources require an explicit schema (inferSchema isn't
     # supported in streaming mode), so read one batch first just to capture it
