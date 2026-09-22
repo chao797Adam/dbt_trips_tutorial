@@ -304,6 +304,13 @@ Note: `outputMode("append")` here means each streaming run only *adds* new rows 
 
 **Idempotency, and its blind spot.** Re-running this script is idempotent in the sense that matters for streaming: `checkpointLocation` tracks which files have already been read, so re-running against the same set of files does not re-process or duplicate them — only newly-added files get picked up. This idempotency is file-based, not content-based: if a source file is overwritten in place with corrected data *after* it has already been processed, the checkpoint has no way to detect that and will not re-read it, since it only tracks which file paths/offsets have been consumed, not their content. This is a structural counterpart to the watermark blind spot documented for dbt's incremental models further down — both the ingestion layer and the transformation layer have a boundary condition where a silent correction at the source can fail to propagate downstream.
 
+| | dbt's watermark blind spot (downstream) | PySpark checkpoint's blind spot (ingestion) |
+|---|---|---|
+| What marks "already processed" | `last_updated_timestamp` (a value on the row) | File path / byte offset (a property of the file itself) |
+| What triggers the blind spot | Source data is corrected, but `last_updated_timestamp` isn't bumped | Source file is overwritten in place with corrected data, but the file path/name doesn't change |
+| Root cause in common | Both track *whether something was already seen*, not *whether its content has changed* — so a marker that doesn't move means the correction is silently missed |
+| Only occurs when | Upstream doesn't reliably update the timestamp on correction | Upstream overwrites files in place rather than emitting a new file per load |
+
 ### 🏗️ Architecture Comparison: Reference Tutorial vs. This Project
 
 The reference tutorial and this project make different decisions about **where transformation logic lives** and **which tool owns which layer**. Both are valid architectures; the right choice depends on team structure, tooling standardization goals, and how much you want to centralize transformation logic in one place. This section lays out the trade-off explicitly.
