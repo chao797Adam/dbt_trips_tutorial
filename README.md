@@ -311,6 +311,8 @@ Note: `outputMode("append")` here means each streaming run only *adds* new rows 
 | Root cause in common | Both track *whether something was already seen*, not *whether its content has changed* — so a marker that doesn't move means the correction is silently missed |
 | Only occurs when | Upstream doesn't reliably update the timestamp on correction | Upstream overwrites files in place rather than emitting a new file per load |
 
+**Data contract dependency.** Both blind spots above share the same root cause: this pipeline's correctness depends on assumptions about the source system that are not enforced anywhere in the code — an implicit data contract rather than a verified one. The ingestion layer assumes the source never overwrites a file in place with the same path/name; the transformation layer assumes `last_updated_timestamp` is reliably bumped on every update. Neither assumption is validated by this project; both would need to be confirmed with whoever owns the source system, or replaced with a more robust signal (e.g. CDC-based extraction, which emits a new record per change rather than relying on either file identity or a timestamp column).
+
 ### 🏗️ Architecture Comparison: Reference Tutorial vs. This Project
 
 The reference tutorial and this project make different decisions about **where transformation logic lives** and **which tool owns which layer**. Both are valid architectures; the right choice depends on team structure, tooling standardization goals, and how much you want to centralize transformation logic in one place. This section lays out the trade-off explicitly.
