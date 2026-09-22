@@ -10,6 +10,6 @@
 }}
 
     select *
-    from {{ ref('stg_payments') }}
+    from {{ ref('silver_payments') }}
 
 {% endsnapshot %}

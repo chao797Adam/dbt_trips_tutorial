@@ -1,5 +1,5 @@
-# not likely to change, but we want to track changes to location attributes over time
-{% snapshot locations_snapshot %}
+-- not likely to change, but we want to track changes to location attributes over time
+{% snapshot dim_locations_snapshot %}
 
     {{
     config(
@@ -11,6 +11,6 @@
 }}
 
     select *
-    from {{ ref('stg_locations') }}
+    from {{ ref('silver_locations') }}
 
 {% endsnapshot %}

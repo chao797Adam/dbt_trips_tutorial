@@ -13,7 +13,4 @@ select
 from trips t
 left join drivers d on t.driver_id = d.driver_id
 where t.trip_status = 'Completed'
-group by
-    1,
-    2
-    {# order by count(t.trip_id) desc, sum(t.fare_amount) desc #}
+group by 1, 2

@@ -14,7 +14,7 @@ with
         -- Only process new or updated records during incremental runs
         {% if is_incremental() %}
             where
-                last_updated_timestamp > (
+                last_updated_timestamp >= (
                     select coalesce(max(last_updated_timestamp), '1900-01-01')
                     from {{ this }}
                 )
@@ -29,7 +29,8 @@ with
                 select
                     *,
                     row_number() over (
-                        partition by location_id order by last_updated_timestamp desc
+                        partition by location_id
+                        order by last_updated_timestamp desc, ingested_at desc
                     ) as rn
                 from base_locations
             )

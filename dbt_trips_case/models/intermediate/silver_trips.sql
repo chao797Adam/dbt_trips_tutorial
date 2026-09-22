@@ -12,7 +12,7 @@ with
         from {{ ref('stg_trips') }}
         {% if is_incremental() %}
             where
-                last_updated_timestamp > (
+                last_updated_timestamp >= (
                     select coalesce(max(last_updated_timestamp), '1900-01-01')
                     from {{ this }}
                 )
@@ -26,7 +26,8 @@ with
                 select
                     *,
                     row_number() over (
-                        partition by trip_id order by last_updated_timestamp desc
+                        partition by trip_id
+                        order by last_updated_timestamp desc, ingested_at desc
                     ) as rn
                 from base_trips
             )

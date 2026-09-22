@@ -1,4 +1,4 @@
-{% snapshot vehicles_snapshot %}
+{% snapshot dim_vehicles_snapshot %}
 
     {{
     config(
@@ -10,6 +10,6 @@
 }}
 
     select *
-    from {{ ref('stg_vehicles') }}
+    from {{ ref('silver_vehicles') }}
 
 {% endsnapshot %}
