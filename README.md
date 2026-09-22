@@ -231,7 +231,7 @@ The Gold layer provides analytics-ready tables for business consumption. Current
 
 `dbt snapshot` works completely differently. On every run, it takes a **photograph** of silver's current state and compares it to the *previous* photograph already stored in the snapshot table. If something changed, it closes out the old version (stamps `dbt_valid_to`) and inserts a new row for the new version — it never overwrites or deletes. That's why the snapshot table accumulates history (both A and B end up as separate rows there) even though the silver table it reads from has already discarded A.
 
-This also means snapshot history is only as complete as how often it's run: if `customer_id = 101` changes twice between two snapshot runs, only the state at the second run's photograph is captured — the intermediate change is invisible to the snapshot, because it never took a picture of it. (See [Limitations](#-known-issues) for a related point on watermark blind spots.)
+This also means snapshot history is only as complete as how often it's run: if `customer_id = 101` changes twice between two snapshot runs, only the state at the second run's photograph is captured — the intermediate change is invisible to the snapshot, because it never took a picture of it.
 
 Snapshots read from the **silver layer**, not staging or gold. This is a deliberate choice between three options:
 
