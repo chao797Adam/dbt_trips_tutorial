@@ -122,6 +122,18 @@ incremental filter (CDC) → row_number() dedup (SCD1) → business transformati
 
 This is a deliberate design decision: **`row_number()` deduplication is a defensive measure to guarantee `merge` never receives duplicate `unique_key` values within a single batch** (a hard requirement of Delta Lake's `MERGE INTO`), not a statement about whether a table is conceptually a fact or dimension. Whether the underlying entity is fact-like (`trips`) or dimension-like (`customers`), the same defensive pattern applies.
 
+**Why `row_number()` is needed again here, even though staging already deduplicated:**
+
+`stg_customers` is a `merge` target, so at any single point in time, querying that table returns at most one row per `customer_id` — `merge` guarantees this. But silver's incremental filter doesn't read staging at a single point in time; it reads a **time range**:
+
+```sql
+where last_updated_timestamp > (select max(last_updated_timestamp) from {{ this }})
+```
+
+This range can span **multiple separate staging `merge` runs**. If `customer_id = 101` was updated at 09:00 (staging run #1, merged cleanly) and again at 09:03 (staging run #2, merged cleanly — overwriting the 09:00 version), staging itself never had duplicates at any instant. But if silver's next run reads everything from, say, 08:55 onward, both the 09:00 and the 09:03 versions fall inside that window and both get pulled into the same result set — because they were two different rows in `stg_customers`'s own change history, not two rows that ever coexisted in a single snapshot of the table.
+
+In short: staging guarantees "no duplicates **at any instant**." Silver's incremental read is a **range query across instants**, which can reassemble duplicates that never existed together at any single moment. That's why silver needs its own `row_number()` — it can't inherit staging's guarantee, because the two layers are protecting against different things.
+
 Example (`silver_customers.sql`):
 ```sql
 {{
@@ -189,6 +201,12 @@ The Gold layer provides analytics-ready tables for business consumption. Current
 ---
 
 ## 📸 Snapshots (SCD2)
+
+**Snapshots don't retrieve history that silver "lost" — they actively create it.** Silver is a `merge` target, so it only ever holds the *current* state: once `customer_id = 101`'s phone number changes from A to B and silver's merge runs, the row with A is overwritten and gone from silver forever. There is no way to query silver and get A back.
+
+`dbt snapshot` works completely differently. On every run, it takes a **photograph** of silver's current state and compares it to the *previous* photograph already stored in the snapshot table. If something changed, it closes out the old version (stamps `dbt_valid_to`) and inserts a new row for the new version — it never overwrites or deletes. That's why the snapshot table accumulates history (both A and B end up as separate rows there) even though the silver table it reads from has already discarded A.
+
+This also means snapshot history is only as complete as how often it's run: if `customer_id = 101` changes twice between two snapshot runs, only the state at the second run's photograph is captured — the intermediate change is invisible to the snapshot, because it never took a picture of it. (See [Limitations](#-known-issues) for a related point on watermark blind spots.)
 
 Snapshots read from the **silver layer**, not staging or gold. This is a deliberate choice between three options:
 

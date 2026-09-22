@@ -6,11 +6,32 @@
     )
 }}
 
-select *, current_timestamp() as ingested_at
-from {{ source('trips_source', 'locations') }}
+with
+    raw_data as (
+        select *, current_timestamp() as ingested_at
+        from {{ source('trips_source', 'locations') }}
 
-{% if is_incremental() %}
-    where
-        last_updated_timestamp
-        >= (select coalesce(max(last_updated_timestamp), '1900-01-01') from {{ this }})
-{% endif %}
+        {% if is_incremental() %}
+            where
+                last_updated_timestamp >= (
+                    select coalesce(max(last_updated_timestamp), '1900-01-01')
+                    from {{ this }}
+                )
+        {% endif %}
+    ),
+    deduplicated as (
+        select *
+        from
+            (
+                select
+                    *,
+                    row_number() over (
+                        partition by location_id
+                        order by last_updated_timestamp desc, ingested_at desc
+                    ) as rn
+                from raw_data
+            )
+        where rn = 1
+    )
+select * except (rn)
+from deduplicated
