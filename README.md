@@ -303,6 +303,54 @@ for entity in entities:
 
 Note: `outputMode("append")` here means each streaming run only *adds* new rows to the `source` table — it never updates a row already landed. Combined with `trigger(once=True)` (process everything currently available, then stop, rather than running continuously), this is the reason `source.customers` can legitimately contain multiple rows for the same `customer_id` over time, which is exactly the condition that `row_number()` deduplication in staging (see below) is defending against.
 
+### 🏗️ Architecture Comparison: Reference Tutorial vs. This Project
+
+The reference tutorial and this project make different decisions about **where transformation logic lives** and **which tool owns which layer**. Both are valid architectures; the right choice depends on team structure, tooling standardization goals, and how much you want to centralize transformation logic in one place. This section lays out the trade-off explicitly.
+
+### Ownership by layer
+
+| Layer | Reference tutorial | This project |
+|---|---|---|
+| Source → Bronze (raw landing) | PySpark Structured Streaming, `outputMode("append")`, no merge/dedup — writes directly into `bronze` | PySpark Structured Streaming — writes only into a dedicated `source` schema, untouched raw landing |
+| Bronze → Silver | **PySpark**, using a Python class with `DeltaTable.merge()` (`whenMatchedUpdateAll().whenNotMatchedInsertAll()`) for upsert + dedup logic | **dbt** — `stg_*` (bronze-equivalent) and `silver_*` models, each using `incremental_strategy='merge'` + `row_number()` |
+| Silver → Gold | **dbt** — gold models reading from silver | **dbt** — gold models reading from silver (same) |
+| Historical tracking (SCD2) | dbt snapshot, defined in YAML, materialized into the `gold` schema | dbt snapshot, defined in SQL blocks, materialized into a dedicated `snapshots` schema, sourced from silver |
+
+### The core architectural difference
+
+```
+Reference tutorial:
+  PySpark (streaming)  →  PySpark (Python class, merge/dedup)  →  dbt (gold only)
+  [   source→bronze   ]  [        bronze→silver              ]  [ silver→gold ]
+
+This project:
+  PySpark (streaming)  →  dbt (staging: merge/dedup)  →  dbt (silver: merge/dedup)  →  dbt (gold)
+  [   source only      ]  [        bronze-equivalent  ]  [        transform          ]  [        ]
+```
+
+In the reference tutorial, **two different tools own transformation logic**: PySpark owns bronze→silver (imperative, class-based, Python), and dbt owns silver→gold (declarative, SQL, `config()`-based). In this project, **dbt owns every transformation step**; PySpark's only job is landing raw files into Delta tables.
+
+### Trade-offs, stated plainly
+
+| Dimension | Reference tutorial (PySpark owns bronze→silver) | This project (dbt owns everything past landing) |
+|---|---|---|
+| **Bronze table integrity** | `bronze` can legitimately contain duplicate keys (streaming append, no merge) — dedup happens once, in silver | `stg_*` guarantees uniqueness at ingestion via `merge` + `row_number()` — every downstream layer can trust it holds one row per key |
+| **Where dedup logic lives** | Once, in a Python class (bronze→silver) | Twice — staging and silver each independently deduplicate, because each layer's incremental read spans a different window and can reassemble duplicates that never coexisted (see [Intermediate (Silver)](#intermediate-silver) for the full reasoning) |
+| **Skill set required per layer** | Requires PySpark/Python proficiency for the bronze→silver step — a Data Engineer skillset | Requires only SQL/Jinja for every transformation step — an Analytics Engineer can own the entire pipeline past ingestion |
+| **Testing, lineage, docs** | Split across two tools: PySpark logic isn't covered by dbt's `dbt test` / `dbt docs` / lineage graph; only silver→gold is | Unified: `dbt test`, `dbt docs generate`, and the lineage graph cover every transformation step from staging through gold |
+| **Tooling to learn/maintain** | Two paradigms: imperative Spark DataFrame API + declarative dbt | One paradigm: declarative SQL/Jinja throughout |
+| **Flexibility for complex logic** | PySpark's full programmatic surface (UDFs, complex branching, external API calls) is available at the bronze→silver step | Limited to what SQL/Jinja can express; anything requiring imperative logic would need a different tool (e.g. a Python model in dbt, or pushing it back into the ingestion step) |
+| **Change history granularity** | Same limitation applies to both: neither preserves every intermediate value within a single incremental window, only what survives that window's dedup pass |
+
+### A solutions-architect framing
+
+The reference tutorial reflects a **DE-owns-transformation-early** pattern: Data Engineers write the ingestion *and* the first transformation pass in PySpark, and Analytics Engineers pick up from silver onward in dbt. This can make sense when the bronze→silver step needs Python-specific capabilities (complex parsing, calling external services, non-SQL-expressible business rules) that dbt's SQL/Jinja can't easily express.
+
+This project reflects a **DE-owns-ingestion-only** pattern: Data Engineers are responsible for getting raw data into Delta reliably (streaming, checkpoints, schema handling), and Analytics Engineers own 100% of the transformation logic — staging through gold — in a single tool, with a single testing/documentation/lineage story. This tends to reduce the number of tools and skillsets required to reason about "what does this pipeline actually do end to end," at the cost of losing PySpark's more expressive programmatic capabilities for any transformation that's awkward to write in SQL.
+
+Neither pattern is universally "correct" — the reference tutorial's split is a legitimate choice when transformation logic genuinely needs Python; this project's consolidation is a legitimate choice when the transformation logic is expressible in SQL and the goal is to minimize tooling surface area and keep lineage/testing unified in one system.
+
+
 ### 3. Missing `incremental_strategy='merge'` in the silver layer — drawback
 
 The reference tutorial's silver-layer config specifies `materialized: incremental` without an explicit `incremental_strategy`. On Databricks, dbt's default incremental strategy is `append` — meaning every incremental run **adds new rows on top of existing ones**, rather than overwriting rows that already exist for a given `unique_key`.
