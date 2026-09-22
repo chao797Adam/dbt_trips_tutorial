@@ -181,7 +181,7 @@ with
     deduplicated as (
         select * from (
             select *, row_number() over (
-                partition by customer_id order by last_updated_timestamp desc
+                partition by customer_id order by last_updated_timestamp desc, ingested_at desc
             ) as rn
             from base_customers
         )
