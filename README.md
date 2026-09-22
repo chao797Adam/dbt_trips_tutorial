@@ -277,7 +277,6 @@ The PySpark `upsert()` method (using `DeltaTable.merge().whenMatchedUpdateAll().
 The reference tutorial's streaming write places `checkpointLocation` under the `bronze` Volume path, despite checkpoints being purely a property of the streaming *read* from `source`, not the *bronze* output layer. In this project, checkpoints live under `/Volumes/pysparkdbt/source/checkpoint/{entity}`, alongside the raw source files they correspond to, keeping the layer boundary (source vs. bronze) unambiguous.
 
 ```python
-
 entities = ['customers', 'payments', 'locations', 'trips', 'vehicles', 'drivers']
 
 for entity in entities:
@@ -307,7 +306,7 @@ Note: `outputMode("append")` here means each streaming run only *adds* new rows 
 
 The reference tutorial and this project make different decisions about **where transformation logic lives** and **which tool owns which layer**. Both are valid architectures; the right choice depends on team structure, tooling standardization goals, and how much you want to centralize transformation logic in one place. This section lays out the trade-off explicitly.
 
-### Ownership by layer
+#### Ownership by layer
 
 | Layer | Reference tutorial | This project |
 |---|---|---|
@@ -316,7 +315,7 @@ The reference tutorial and this project make different decisions about **where t
 | Silver → Gold | **dbt** — gold models reading from silver | **dbt** — gold models reading from silver (same) |
 | Historical tracking (SCD2) | dbt snapshot, defined in YAML, materialized into the `gold` schema | dbt snapshot, defined in SQL blocks, materialized into a dedicated `snapshots` schema, sourced from silver |
 
-### The core architectural difference
+#### The core architectural difference
 
 ```
 Reference tutorial:
@@ -330,7 +329,7 @@ This project:
 
 In the reference tutorial, **two different tools own transformation logic**: PySpark owns bronze→silver (imperative, class-based, Python), and dbt owns silver→gold (declarative, SQL, `config()`-based). In this project, **dbt owns every transformation step**; PySpark's only job is landing raw files into Delta tables.
 
-### Trade-offs, stated plainly
+#### Trade-offs, stated plainly
 
 | Dimension | Reference tutorial (PySpark owns bronze→silver) | This project (dbt owns everything past landing) |
 |---|---|---|
@@ -342,7 +341,7 @@ In the reference tutorial, **two different tools own transformation logic**: PyS
 | **Flexibility for complex logic** | PySpark's full programmatic surface (UDFs, complex branching, external API calls) is available at the bronze→silver step | Limited to what SQL/Jinja can express; anything requiring imperative logic would need a different tool (e.g. a Python model in dbt, or pushing it back into the ingestion step) |
 | **Change history granularity** | Same limitation applies to both: neither preserves every intermediate value within a single incremental window, only what survives that window's dedup pass |
 
-### A solutions-architect framing
+#### A solutions-architect framing
 
 The reference tutorial reflects a **DE-owns-transformation-early** pattern: Data Engineers write the ingestion *and* the first transformation pass in PySpark, and Analytics Engineers pick up from silver onward in dbt. This can make sense when the bronze→silver step needs Python-specific capabilities (complex parsing, calling external services, non-SQL-expressible business rules) that dbt's SQL/Jinja can't easily express.
 
