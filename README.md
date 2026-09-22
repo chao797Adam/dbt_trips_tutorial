@@ -173,7 +173,7 @@ with
     base_customers as (
         select * from {{ ref('stg_customers') }}
         {% if is_incremental() %}
-            where last_updated_timestamp > (
+            where last_updated_timestamp >= (
                 select coalesce(max(last_updated_timestamp), '1900-01-01') from {{ this }}
             )
         {% endif %}
@@ -360,3 +360,4 @@ Raw CSV files are loaded into the `pysparkdbt.source` schema via PySpark Structu
 - [dbt Documentation](https://docs.getdbt.com/docs/introduction)
 - [dbt-databricks Adapter Setup](https://docs.getdbt.com/reference/warehouse-setups/databricks-setup)
 - [dbt Snapshots](https://docs.getdbt.com/docs/build/snapshots)
+- [Tutorial / Reference Video](https://www.youtube.com/watch?v=cq7Uv7ctGjw&t=1569s)
