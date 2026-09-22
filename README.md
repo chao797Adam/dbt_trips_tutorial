@@ -190,16 +190,20 @@ The Gold layer provides analytics-ready tables for business consumption. Current
 
 ## 📸 Snapshots (SCD2)
 
-Snapshots are kept **independent of the bronze/silver/gold layers** and read from staging (`stg_*`) models — i.e., data close to the original source — rather than from the gold layer. This keeps the historical record clean: each snapshot tracks changes to a single entity, rather than mixing in changes introduced by joins in a downstream wide table.
+Snapshots read from the **silver layer**, not staging or gold. This is a deliberate choice between three options:
+
+- **Not staging (`stg_*`)**: staging is renamed and timestamped raw data, but not yet deduplicated or cleaned (e.g. `trim()`ed). Snapshots are append-only — once a version is recorded, it's part of the permanent history. If staging data still has formatting noise, `strategy='check'` would misread that noise as a real business change, and that bad version gets baked into history permanently, with no cheap way to undo it later.
+- **Not gold**: gold tables are joined and denormalized. A snapshot on gold would attribute changes introduced by a join (e.g. an unrelated dimension's row disappearing) to the tracked entity itself, mixing "this entity changed" with "something upstream in the join changed."
+- **Silver** is the layer where deduplication (SCD1) and cleaning are already complete, so a change detected there reflects a genuine change in the underlying entity — not a source-timestamp artifact, and not a join side-effect.
 
 | Snapshot | Source | Tracks Changes In |
 |----------|--------|---------------------|
-| `trips_snapshot` | `stg_trips` | `trip_status`, `trip_end_time`, `distance_km`, `fare_amount`, `payment_method` — fields that get filled in / updated as a trip progresses from `ongoing` to `completed` |
-| `payments_snapshot` | `stg_payments` | `payment_status`, `payment_method`, `amount` |
-| `dim_customers_snapshot` | `stg_customers` | `city`, `phone_number` |
-| `dim_drivers_snapshot` | `stg_drivers` | `first_name`,`last_name`, `phone_number` |
-| `dim_vehicles_snapshot` | `stg_vehicles` | `vehicle_type`, `year`, `model`, `make` / attributes |
-| `dim_locations_snapshot` | `stg_locations` | `city`, `state`, `country` (rarely changes, but tracked defensively in case of data corrections) |
+| `trips_snapshot` | `silver_trips` | `trip_status`, `trip_end_time`, `distance_km`, `fare_amount`, `payment_method` — fields that get filled in / updated as a trip progresses from `ongoing` to `completed` |
+| `payments_snapshot` | `silver_payments` | `payment_status`, `payment_method`, `amount` |
+| `dim_customers_snapshot` | `silver_customers` | `city`, `phone_number`, `full_name` |
+| `dim_drivers_snapshot` | `silver_drivers` | `phone_number`, `full_name` |
+| `dim_vehicles_snapshot` | `silver_vehicles` | `vehicle_type`, `year`, `model`, `make` |
+| `dim_locations_snapshot` | `silver_locations` | `city`, `state`, `country` (rarely changes, but tracked defensively in case of data corrections) |
 
 Naming convention: dimension-type entities are prefixed `dim_`; fact-type entities (`trips`, `payments`) are not, consistent with standard Kimball-style naming.
 
@@ -255,7 +259,7 @@ The reference tutorial defines snapshots declaratively in a `snapshots/SCDs.yml`
 This project instead defines snapshots using the traditional `{% snapshot %}` SQL block syntax, sourced from staging (`stg_*`) models, with the snapshot output kept in its own dedicated `snapshots` schema rather than `gold`. Two separate deviations are bundled here:
 
 - **Format**: SQL-block snapshots (this project) vs. YAML-based snapshots (reference). Both are valid, supported dbt syntaxes — this is a stylistic choice, not a correctness issue. YAML snapshots are dbt's more recent recommended format and reduce boilerplate when many snapshots share the same shape, but the SQL-block format makes the underlying `select` statement and any inline transformation more explicit and easier to read for a small number of snapshots.
-- **Output location**: gold schema (reference) vs. a dedicated `snapshots` schema (this project). Materializing SCD2 history directly into the gold layer blurs the boundary between "current-state analytics tables" and "historical change-tracking tables" — a BI tool browsing the gold schema would see snapshot tables mixed in with regular fact/dimension tables. This project keeps snapshots in their own schema, sourced from staging (`stg_*`) models, so that gold remains a clean, current-state-only analytics layer, and snapshot history is clearly demarcated as a separate concern.
+- **Output location**: gold schema (reference) vs. a dedicated `snapshots` schema (this project). Materializing SCD2 history directly into the gold layer blurs the boundary between "current-state analytics tables" and "historical change-tracking tables" — a BI tool browsing the gold schema would see snapshot tables mixed in with regular fact/dimension tables. This project keeps snapshots in their own schema, sourced from the **silver** layer rather than gold, so that gold remains a clean, current-state-only analytics layer, and snapshot history is clearly demarcated as a separate concern. Sourcing from silver rather than staging is a further refinement beyond the reference tutorial: silver has already been deduplicated and cleaned, so a snapshot built on it only records genuine entity-level changes, not source-formatting noise.
 
 ### 6. Stylistic: Jinja used for field-list generation
 
