@@ -276,6 +276,30 @@ The PySpark `upsert()` method (using `DeltaTable.merge().whenMatchedUpdateAll().
 
 The reference tutorial's streaming write places `checkpointLocation` under the `bronze` Volume path, despite checkpoints being purely a property of the streaming *read* from `source`, not the *bronze* output layer. In this project, checkpoints live under `/Volumes/pysparkdbt/source/checkpoint/{entity}`, alongside the raw source files they correspond to, keeping the layer boundary (source vs. bronze) unambiguous.
 
+```python
+for entity in entities:
+    # CSV streaming sources require an explicit schema (inferSchema isn't
+    # supported in streaming mode), so read one batch first just to capture it
+    df_batch = spark.read.format('csv') \
+        .option('header', True) \
+        .option('inferSchema', True) \
+        .load(f"/Volumes/pysparkdbt/source/source_data/{entity}/")
+    schema_entity = df_batch.schema
+
+    df = spark.readStream.format("csv") \
+        .option('header', True) \
+        .schema(schema_entity) \
+        .load(f"/Volumes/pysparkdbt/source/source_data/{entity}")
+
+    df.writeStream.format("delta") \
+        .outputMode("append") \
+        .option("checkpointLocation", f"/Volumes/pysparkdbt/source/checkpoint/{entity}") \
+        .trigger(once=True) \
+        .toTable(f"pysparkdbt.source.{entity}")
+```
+
+Note: `outputMode("append")` here means each streaming run only *adds* new rows to the `source` table — it never updates a row already landed. Combined with `trigger(once=True)` (process everything currently available, then stop, rather than running continuously), this is the reason `source.customers` can legitimately contain multiple rows for the same `customer_id` over time, which is exactly the condition that `row_number()` deduplication in staging (see below) is defending against.
+
 ### 3. Missing `incremental_strategy='merge'` in the silver layer — drawback
 
 The reference tutorial's silver-layer config specifies `materialized: incremental` without an explicit `incremental_strategy`. On Databricks, dbt's default incremental strategy is `append` — meaning every incremental run **adds new rows on top of existing ones**, rather than overwriting rows that already exist for a given `unique_key`.
