@@ -89,7 +89,7 @@ dbt_trips_case/
 
 ### Staging (Bronze)
 
-All 6 staging models follow the same pattern: incremental load filtered by `last_updated_timestamp`, with a `coalesce` fallback to handle the empty-table edge case.
+All 6 staging models follow the same pattern: incremental filter (CDC) by `last_updated_timestamp`, with a `coalesce` fallback to handle the empty-table edge case, followed by `row_number()` deduplication before the `merge`.
 
 ```sql
 {{
@@ -100,17 +100,42 @@ All 6 staging models follow the same pattern: incremental load filtered by `last
     )
 }}
 
-select *, current_timestamp() as ingested_at
-from {{ source('trips_source', 'customers') }}
+with
+    raw_data as (
+        select *, current_timestamp() as ingested_at
+        from {{ source('trips_source', 'customers') }}
+        {% if is_incremental() %}
+            where
+                last_updated_timestamp >= (
+                    select coalesce(max(last_updated_timestamp), '1900-01-01')
+                    from {{ this }}
+                )
+        {% endif %}
+    ),
 
-{% if is_incremental() %}
-    where last_updated_timestamp > (
-        select coalesce(max(last_updated_timestamp), '1900-01-01') from {{ this }}
+    deduplicated as (
+        select *
+        from (
+            select
+                *,
+                row_number() over (
+                    partition by customer_id
+                    order by last_updated_timestamp desc, ingested_at desc
+                ) as rn
+            from raw_data
+        )
+        where rn = 1
     )
-{% endif %}
+
+select * except (rn)
+from deduplicated
 ```
 
 The `coalesce(..., '1900-01-01')` fallback prevents the filter from silently returning zero rows when the target table is empty (since `NULL` comparisons in SQL always evaluate to false).
+
+The filter uses `>=`, not `>`, so records from the latest already-loaded timestamp are reprocessed on every run — this is safe because `merge` on the unique key is idempotent, and it prevents late-arriving records sharing that exact timestamp from being silently skipped.
+
+`row_number()` deduplication here is required for the same reason it's required in silver (see below): `merge` requires the incoming batch to contain no duplicate `unique_key` values, and the raw `source` table can legitimately contain multiple rows for the same `customer_id` (e.g. successive updates from the streaming write), so this step guarantees the batch handed to `merge` is always clean.
 
 ### Intermediate (Silver)
 
@@ -258,6 +283,8 @@ The reference tutorial's silver-layer config specifies `materialized: incrementa
 This has a concrete drawback: if a row that was already loaded gets updated at the source (e.g. a customer's `last_updated_timestamp` changes because their phone number was corrected), the next incremental run **appends a second row for the same `customer_id`** rather than overwriting the first. Without an additional deduplication step downstream, the silver table accumulates multiple rows per entity over time — defeating the purpose of an "incremental" load that's supposed to reflect current state.
 
 This project explicitly sets `incremental_strategy='merge'` with a matching `unique_key` on every silver model, so that updates to an existing row correctly overwrite the prior version instead of accumulating duplicates. A `row_number()` deduplication step is also included as a defensive measure, since Delta Lake's `MERGE INTO` requires the incoming batch to contain no duplicate `unique_key` values.
+
+This same `row_number()` + `merge` pattern is applied uniformly across staging as well, for the same reason: staging's `merge` target guarantees the *table* has no duplicates at any instant, but that guarantee doesn't automatically extend to what downstream layers read from it. Silver's incremental filter reads a **time range** from staging (`where last_updated_timestamp > last processed value`), and that range can span multiple separate staging `merge` runs. If a row was updated once during staging run #1 and again during staging run #2, staging itself never held duplicates at any single instant — but silver's next run can pull both versions into the same result set, because they were two different rows in staging's change history, not two rows that ever coexisted at once. In short: staging guarantees "no duplicates at any instant"; silver's read is a range query across instants, which can reassemble duplicates that never existed together at any single moment. That's why every layer — staging and silver alike — needs its own independent `row_number()` step; neither can inherit the other's guarantee.
 
 ### 4. Snapshot strategy: `check` vs. `timestamp`
 
